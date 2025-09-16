@@ -7,7 +7,6 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
 
-    <groupId>com.phoenix.distributed.framework.banner</groupId>
     <artifactId>distributed-cloud-spring-boot-starter-banner</artifactId>
     <packaging>jar</packaging>
 

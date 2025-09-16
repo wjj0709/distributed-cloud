@@ -1,0 +1,37 @@
+package com.phoenix.distributed.lang.define.collect;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collection;
+
+/**
+ * 可转换的 ArrayList
+ *
+ * @author wjj-phoenix
+ * @since 2020/2/29 16:29
+ */
+public class MutableArrayList<E> extends ArrayList<E> implements MutableList<E>, Serializable {
+
+    private static final long serialVersionUID = 66823498912315567L;
+
+    public MutableArrayList() {
+        super();
+    }
+
+    public MutableArrayList(int initialCapacity) {
+        super(initialCapacity);
+    }
+
+    public MutableArrayList(Collection<? extends E> c) {
+        super(c);
+    }
+
+    public static <E> MutableArrayList<E> create() {
+        return new MutableArrayList<>();
+    }
+
+    public static <E> MutableArrayList<E> create(Collection<? extends E> c) {
+        return new MutableArrayList<>(c);
+    }
+
+}
