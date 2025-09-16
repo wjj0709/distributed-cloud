@@ -1,13 +1,13 @@
 package com.phoenix.distributed.lang.define.wrapper;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.phoenix.distributed.lang.KitLangConfiguration;
 import com.phoenix.distributed.lang.able.IJsonObject;
 import com.phoenix.distributed.lang.config.KitConfig;
 import com.phoenix.distributed.lang.define.iterator.EmptyIterator;
 import com.phoenix.distributed.lang.define.support.CloneSupport;
 import com.phoenix.distributed.lang.utils.collect.Lists;
-import com.alibaba.fastjson.annotation.JSONField;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.io.Serializable;
 import java.util.ArrayList;

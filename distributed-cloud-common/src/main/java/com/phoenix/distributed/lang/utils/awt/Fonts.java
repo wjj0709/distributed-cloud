@@ -1,7 +1,5 @@
 package com.phoenix.distributed.lang.utils.awt;
 
-import sun.font.FontDesignMetrics;
-
 import java.awt.*;
 import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphVector;
@@ -24,7 +22,8 @@ public class Fonts {
      * @return metrics
      */
     public static FontMetrics getMetrics(Font font) {
-        return FontDesignMetrics.getMetrics(font);
+        // 使用 Toolkit 获取 FontMetrics，替代 FontDesignMetrics
+        return Toolkit.getDefaultToolkit().getFontMetrics(font);
     }
 
     /**
@@ -35,19 +34,19 @@ public class Fonts {
      * @return 实际长度
      */
     public static int getStringWidth(char c, Font font) {
-        FontMetrics fm = FontDesignMetrics.getMetrics(font);
+        FontMetrics fm = getMetrics(font);
         return fm.charWidth(c);
     }
 
     /**
-     * 获取字符传实际长度
+     * 获取字符串实际长度
      *
      * @param s    s
      * @param font font
      * @return 实际长度
      */
     public static int getStringWidth(String s, Font font) {
-        FontMetrics fm = FontDesignMetrics.getMetrics(font);
+        FontMetrics fm = getMetrics(font);
         return fm.stringWidth(s);
     }
 
@@ -58,7 +57,7 @@ public class Fonts {
      * @return 高度
      */
     public static int getHeight(Font font) {
-        FontMetrics fm = FontDesignMetrics.getMetrics(font);
+        FontMetrics fm = getMetrics(font);
         return fm.getHeight();
     }
 

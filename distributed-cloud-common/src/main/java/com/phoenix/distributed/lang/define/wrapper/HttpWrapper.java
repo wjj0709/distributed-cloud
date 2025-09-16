@@ -1,5 +1,7 @@
 package com.phoenix.distributed.lang.define.wrapper;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.phoenix.distributed.lang.KitLangConfiguration;
 import com.phoenix.distributed.lang.able.ILogObject;
 import com.phoenix.distributed.lang.able.IMapObject;
@@ -8,8 +10,6 @@ import com.phoenix.distributed.lang.constant.Const;
 import com.phoenix.distributed.lang.define.support.CloneSupport;
 import com.phoenix.distributed.lang.utils.Objects1;
 import com.phoenix.distributed.lang.utils.Strings;
-import com.alibaba.fastjson.annotation.JSONField;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.util.HashMap;
 import java.util.Map;

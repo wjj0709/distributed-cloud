@@ -7,23 +7,12 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
 
-    <groupId>com.phoenix.distributed.framework</groupId>
-    <artifactId>distributed-cloud-framework</artifactId>
+    <artifactId>distributed-cloud-modules</artifactId>
     <packaging>pom</packaging>
 
-    <name>distributed-cloud-framework</name>
-
+    <name>distributed-cloud-modules</name>
     <modules>
-        <module>distributed-cloud-spring-boot-starter-logger</module>
-        <module>distributed-cloud-spring-boot-starter-validation</module>
-        <module>distributed-cloud-spring-boot-starter-monitor</module>
-        <module>distributed-cloud-spring-boot-starter-security</module>
-        <module>distributed-cloud-spring-boot-starter-mybatis</module>
-        <module>distributed-cloud-spring-boot-starter-swagger</module>
-        <module>distributed-cloud-spring-boot-starter-redis</module>
-        <module>distributed-cloud-spring-boot-starter-banner</module>
-        <module>distributed-cloud-spring-boot-starter-datasource</module>
-        <module>distributed-cloud-spring-boot-starter-web</module>
+        <module>distributed-cloud-module-authorization</module>
     </modules>
 
     <properties>
@@ -40,8 +29,12 @@
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
         </dependency>
     </dependencies>
 </project>

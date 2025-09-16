@@ -2,7 +2,6 @@ package com.phoenix.distributed.common.enums;
 
 import com.phoenix.distributed.common.lang.R;
 import jakarta.annotation.Nullable;
-import lombok.Getter;
 
 import java.text.MessageFormat;
 
@@ -11,7 +10,6 @@ import java.text.MessageFormat;
  * @since 2025-09-16
  * 响应码枚举
  */
-@Getter
 public enum RespEnum {
     SUCCESS(0, "请求成功"),
     /**
@@ -124,6 +122,14 @@ public enum RespEnum {
     RespEnum(Integer code, String message) {
         this.code = code;
         this.message = message;
+    }
+
+    public Integer getCode() {
+        return code;
+    }
+
+    public String getMessage() {
+        return message;
     }
 
     /**

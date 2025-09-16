@@ -1,15 +1,13 @@
 package com.phoenix.distributed.lang.utils.json;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.TypeReference;
 import com.phoenix.distributed.lang.constant.Const;
-import com.phoenix.distributed.lang.utils.Objects1;
 import com.phoenix.distributed.lang.utils.Strings;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONPath;
-import com.alibaba.fastjson.TypeReference;
 
 import java.util.*;
 
-import static com.alibaba.fastjson.serializer.SerializerFeature.WriteMapNullValue;
+import static com.alibaba.fastjson2.JSONWriter.Feature.WriteMapNullValue;
 
 /**
  * fastJson 工具类
@@ -115,38 +113,7 @@ public class Jsons {
         if (Strings.isBlank(json)) {
             return new HashMap<>(Const.CAPACITY_16);
         }
-        return JSON.parseObject(json, new TypeReference<Map<K, V>>(kc, vc) {
+        return JSON.parseObject(json, new TypeReference<>(kc, vc) {
         });
     }
-
-    /**
-     * 读取路径
-     *
-     * @param json json
-     * @param path path
-     * @return value
-     */
-    public static Object readPath(String json, String path) {
-        try {
-            return JSONPath.read(json, path);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /**
-     * 读取路径 string
-     *
-     * @param json json
-     * @param path path
-     * @return string
-     */
-    public static String readPathToString(String json, String path) {
-        Object value = readPath(json, path);
-        if (value == null) {
-            return null;
-        }
-        return Objects1.toString(value);
-    }
-
 }

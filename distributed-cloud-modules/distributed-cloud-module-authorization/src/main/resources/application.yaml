@@ -1,0 +1,28 @@
+server:
+  port: 18080
+  shutdown: graceful
+
+spring:
+  application:
+    name: @artifactId@
+  cloud:
+    nacos:
+      username: nacos
+      password: nacos
+      discovery:
+        server-addr: 192.168.156.24:8848
+      config:
+        server-addr: ${spring.cloud.nacos.server-addr}
+  config:
+    import:
+      - nacos:application-@profile.active@.yaml
+      - nacos:${spring.application.name}-@profile.active@.yaml
+
+springdoc:
+  packages-to-scan: com.phoenix.distributed.authorization.controller
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+  api-docs:
+    enabled: true
+    path: /v3/api-docs

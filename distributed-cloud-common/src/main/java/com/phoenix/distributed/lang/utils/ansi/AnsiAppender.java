@@ -121,5 +121,4 @@ public class AnsiAppender {
     public String toString() {
         return this.get();
     }
-
 }
