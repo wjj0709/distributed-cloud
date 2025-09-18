@@ -21,7 +21,6 @@
         <module>distributed-cloud-spring-boot-starter-mybatis</module>
         <module>distributed-cloud-spring-boot-starter-swagger</module>
         <module>distributed-cloud-spring-boot-starter-redis</module>
-        <module>distributed-cloud-spring-boot-starter-banner</module>
         <module>distributed-cloud-spring-boot-starter-datasource</module>
         <module>distributed-cloud-spring-boot-starter-web</module>
     </modules>

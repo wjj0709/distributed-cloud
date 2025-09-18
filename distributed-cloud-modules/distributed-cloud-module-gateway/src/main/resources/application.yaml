@@ -1,10 +1,10 @@
 server:
-  port: 18080
+  port: 18081
   shutdown: graceful
 
 spring:
   application:
-    name: distributed-cloud-module-authorization
+    name: distributed-cloud-module-gateway
   cloud:
     nacos:
       username: nacos

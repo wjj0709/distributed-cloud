@@ -2,15 +2,15 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>com.phoenix.distributed.framework</groupId>
-        <artifactId>distributed-cloud-framework</artifactId>
+        <groupId>com.phoenix.distributed</groupId>
+        <artifactId>distributed-cloud-modules</artifactId>
         <version>0.0.1-SNAPSHOT</version>
     </parent>
 
-    <artifactId>distributed-cloud-spring-boot-starter-banner</artifactId>
+    <artifactId>distributed-cloud-module-gateway</artifactId>
     <packaging>jar</packaging>
 
-    <name>distributed-cloud-spring-boot-starter-banner</name>
+    <name>distributed-cloud-module-gateway</name>
 
     <properties>
         <java.version>21</java.version>
@@ -20,6 +20,5 @@
     </properties>
 
     <dependencies>
-
     </dependencies>
 </project>
