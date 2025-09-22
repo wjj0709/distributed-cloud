@@ -1,6 +1,8 @@
 package com.phoenix.distributed.common.utils;
 
+import java.lang.reflect.Array;
 import java.util.Arrays;
+import java.util.Collection;
 
 /**
  * @author wjj-phoenix
@@ -19,6 +21,17 @@ public final class ArrayUtil {
     }
 
     /**
+     * 数组是否为非空
+     *
+     * @param <T>   数组元素类型
+     * @param array 数组
+     * @return 是否为非空
+     */
+    public static <T> boolean isNotEmpty(T[] array) {
+        return (null != array && array.length != 0);
+    }
+
+    /**
      * 对象是否为数组对象
      *
      * @param obj 对象
@@ -26,6 +39,61 @@ public final class ArrayUtil {
      */
     public static boolean isArray(Object obj) {
         return null != obj && obj.getClass().isArray();
+    }
+
+    /**
+     * 将集合转为数组
+     *
+     * @param <T>           数组元素类型
+     * @param collection    集合
+     * @param componentType 集合元素类型
+     * @return 数组
+     */
+    public static <T> T[] toArray(Collection<T> collection, Class<T> componentType) {
+        return collection.toArray(newArray(componentType, 0));
+    }
+
+    /**
+     * 将多个数组合并在一起<br>
+     * 忽略null的数组
+     *
+     * @param <T>    数组元素类型
+     * @param arrays 数组集合
+     * @return 合并后的数组
+     */
+    public static <T> T[] addAll(T[]... arrays) {
+        if (arrays.length == 1) {
+            return arrays[0];
+        }
+
+        int length = 0;
+        for (final T[] array : arrays) {
+            if (isNotEmpty(array)) {
+                length += array.length;
+            }
+        }
+        final T[] result = newArray(arrays.getClass().getComponentType().getComponentType(), length);
+
+        length = 0;
+        for (final T[] array : arrays) {
+            if (isNotEmpty(array)) {
+                System.arraycopy(array, 0, result, length, array.length);
+                length += array.length;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 新建一个空数组
+     *
+     * @param <T>           数组元素类型
+     * @param componentType 元素类型
+     * @param newSize       大小
+     * @return 空数组
+     */
+    public static <T> T[] newArray(Class<?> componentType, int newSize) {
+        return (T[]) Array.newInstance(componentType, newSize);
     }
 
     /**

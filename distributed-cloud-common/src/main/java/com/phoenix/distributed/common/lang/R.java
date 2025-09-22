@@ -46,6 +46,18 @@ public final class R<T> {
         this.timestamp = System.currentTimeMillis();
     }
 
+    private R() {
+    }
+
+    public static <T> R<T> restResult(T data, int code, String msg) {
+        R<T> apiResult = new R<>();
+        apiResult.setCode(code);
+        apiResult.setData(data);
+        apiResult.setMessage(msg);
+        apiResult.setTimestamp(System.currentTimeMillis());
+        return apiResult;
+    }
+
     public static <T> R<T> success() {
         return new R<>(200, "success", null);
     }

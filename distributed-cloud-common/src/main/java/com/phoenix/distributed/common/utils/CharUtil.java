@@ -6,6 +6,20 @@ package com.phoenix.distributed.common.utils;
  */
 public final class CharUtil {
     /**
+     * 比较两个字符是否相同
+     *
+     * @param c1              字符1
+     * @param c2              字符2
+     * @param caseInsensitive 是否忽略大小写
+     * @return 是否相同
+     */
+    public static boolean equals(char c1, char c2, boolean caseInsensitive) {
+        if (caseInsensitive) {
+            return Character.toLowerCase(c1) == Character.toLowerCase(c2);
+        }
+        return c1 == c2;
+    }
+    /**
      * 是否空白符<br>
      * 空白符包括空格、制表符、全角空格和不间断空格<br>
      *
