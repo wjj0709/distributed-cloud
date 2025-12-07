@@ -1,0 +1,626 @@
+package com.phoenix.field.interceptor;
+
+import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.inner.InnerInterceptor;
+import com.phoenix.field.entity.EmployeeFieldPerm;
+import com.phoenix.field.mapper.EmployeeFieldPermMapper;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.ibatis.executor.Executor;
+import org.apache.ibatis.mapping.BoundSql;
+import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.reflection.MetaObject;
+import org.apache.ibatis.reflection.SystemMetaObject;
+import org.apache.ibatis.session.ResultHandler;
+import org.apache.ibatis.session.RowBounds;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.stereotype.Component;
+
+import java.sql.SQLException;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+/**
+ * 字段权限拦截器
+ * 实现基于用户身份的字段级别数据权限控制
+ *
+ * @author wjj-phoenix
+ * @since 2025-12-05
+ */
+@Slf4j
+@Component
+public class FieldPermInterceptor implements InnerInterceptor, ApplicationRunner {
+    private static final List<String> WHITELIST_TABLE = new ArrayList<>(Collections.singletonList("employee_field_perm"));
+
+    @Lazy
+    @Autowired
+    private EmployeeFieldPermMapper employeeFieldPermMapper;
+
+    private static final Map<String, List<EmployeeFieldPerm>> tableMapFields = new HashMap<>();
+    private static final Map<String, List<EmployeeFieldPerm>> employeeMapFields = new HashMap<>();
+
+    // 缓存字段权限信息，key为"tableName:idCard"，value为字段列表
+    private final Map<String, CacheEntry<List<String>>> fieldPermissionCache = new ConcurrentHashMap<>();
+    // 缓存表是否需要字段权限控制的信息，key为表名，value为布尔值
+    private final Map<String, CacheEntry<Boolean>> tableFieldControlCache = new ConcurrentHashMap<>();
+    // 缓存过期时间（毫秒），设置为5分钟
+    private static final long CACHE_EXPIRATION_TIME = 5 * 60 * 1000;
+
+    // 匹配SELECT语句中的字段列表
+    private static final Pattern SELECT_PATTERN = Pattern.compile("SELECT\\s+(.*?)\\s+FROM", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    // 匹配FROM语句中的表名
+    private static final Pattern FROM_PATTERN = Pattern.compile("FROM\\s+([\\w_]+)", Pattern.CASE_INSENSITIVE);
+    // 匹配JOIN语句中的表名
+    private static final Pattern JOIN_PATTERN = Pattern.compile("(LEFT\\s+|RIGHT\\s+|INNER\\s+|OUTER\\s+)?JOIN\\s+([\\w_]+)", Pattern.CASE_INSENSITIVE);
+
+
+    @Override
+    public void run(ApplicationArguments args) throws Exception {
+        final List<EmployeeFieldPerm> fieldPerms = employeeFieldPermMapper.selectList(null);
+        tableMapFields.putAll(fieldPerms.stream().collect(Collectors.groupingBy(EmployeeFieldPerm::getTableName)));
+        employeeMapFields.putAll(fieldPerms.stream().collect(Collectors.groupingBy(EmployeeFieldPerm::getIdCard)));
+    }
+
+    @Override
+    public void beforeQuery(Executor executor, MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) throws SQLException {
+        String originalSql = boundSql.getSql();
+
+        // 解析SQL获取所有表名
+        List<String> tableNames = parseTableNames(originalSql);
+        if (tableNames.isEmpty()) {
+            return;
+        }
+        log.info("SQL: {}", originalSql);
+        log.info("table name: {}", tableNames);
+
+        // 检查是否有需要进行字段权限控制的表
+        Map<String, List<String>> tableFieldPermissions = new HashMap<>();
+        boolean needFieldControl = false;
+        for (String tableName : tableNames) {
+            if (WHITELIST_TABLE.contains(tableName)) {
+                continue; // 白名单表不处理
+            }
+
+            // 检查该表是否配置了字段权限
+            if (isTableInFieldPerm(tableName)) {
+                needFieldControl = true;
+                // 获取当前用户对该表的字段权限
+                List<String> permittedFields = getUserPermittedFields(tableName, getCurrentUserIdCard());
+                log.info(" has field permissions for table {}: {}", tableName, permittedFields);
+                tableFieldPermissions.put(tableName, permittedFields);
+            }
+        }
+
+        // 如果没有任何表需要字段权限控制，则直接返回
+        if (!needFieldControl) {
+            return;
+        }
+
+        // 获取当前用户ID（需要根据实际认证框架调整）
+        String currentUserIdCard = getCurrentUserIdCard();
+        if (StrUtil.isEmpty(currentUserIdCard)) {
+            // 无用户信息时，所有受控字段都设为NULL
+            String modifiedSql = removeAllSensitiveFields(originalSql, tableFieldPermissions);
+            // 修改BoundSql中的SQL语句
+            modifyBoundSql(ms, boundSql, modifiedSql);
+            log.warn("Modified SQL due to missing user ID: {}", modifiedSql);
+            return;
+        }
+
+        // 修改SQL添加字段权限过滤
+        String modifiedSql = modifySqlWithFieldPermission(originalSql, tableFieldPermissions, currentUserIdCard);
+        // 修改BoundSql中的SQL语句
+        modifyBoundSql(ms, boundSql, modifiedSql);
+        log.info("Modified SQL with field permissions: {}", modifiedSql);
+    }
+
+    @Override
+    public void beforeUpdate(Executor executor, MappedStatement ms, Object parameter) throws SQLException {
+        // 获取SQL命令类型
+        String sqlCommandType = ms.getSqlCommandType().toString();
+
+        // 只处理INSERT和UPDATE操作
+        if (!"INSERT".equals(sqlCommandType) && !"UPDATE".equals(sqlCommandType)) {
+            return;
+        }
+
+        // 获取当前用户ID
+        String currentUserIdCard = getCurrentUserIdCard();
+        if (StrUtil.isEmpty(currentUserIdCard)) {
+            // 无用户信息时拒绝所有写操作
+            throw new SQLException("User not authenticated, cannot perform write operations");
+        }
+
+        // 获取表名
+        String tableName = parseTableNameFromMappedStatement(ms);
+        if (StrUtil.isEmpty(tableName) || WHITELIST_TABLE.contains(tableName)) {
+            return; // 白名单表或无法解析时不处理
+        }
+
+        // 检查该表是否配置了字段权限
+        if (!isTableInFieldPerm(tableName)) {
+            return; // 未配置字段权限的表不做处理
+        }
+
+        // 获取用户对该表的字段权限
+        List<String> permittedFields = getUserPermittedFields(tableName, currentUserIdCard);
+
+        // 检查并过滤参数中的字段
+        filterUpdateParameters(parameter, tableName, permittedFields);
+    }
+
+    /**
+     * 解析SQL中的所有表名（包括JOIN的表）
+     *
+     * @param sql 原始SQL语句
+     * @return 表名列表
+     */
+    private List<String> parseTableNames(String sql) {
+        List<String> tableNames = new ArrayList<>();
+
+        // 查找主表
+        Matcher fromMatcher = FROM_PATTERN.matcher(sql);
+        if (fromMatcher.find()) {
+            tableNames.add(fromMatcher.group(1));
+        }
+
+        // 查找JOIN的表
+        Matcher joinMatcher = JOIN_PATTERN.matcher(sql);
+        while (joinMatcher.find()) {
+            tableNames.add(joinMatcher.group(2)); // group(2)是表名
+        }
+
+        return tableNames;
+    }
+
+    /**
+     * 从MappedStatement中解析表名
+     *
+     * @param ms MappedStatement对象
+     * @return 表名
+     */
+    private String parseTableNameFromMappedStatement(MappedStatement ms) {
+        // 从MappedStatement的ID中提取表名
+        // 通常MyBatis Plus的MappedStatement ID格式为: mapperMethodName
+        // 例如: com.phoenix.field.mapper.EmployeeMapper.insert
+        String id = ms.getId();
+        if (StrUtil.isNotEmpty(id)) {
+            // 提取类名部分
+            int lastDotIndex = id.lastIndexOf('.');
+            if (lastDotIndex > 0) {
+                String className = id.substring(0, lastDotIndex);
+                // 从类名中提取表名
+                // 例如: com.phoenix.field.mapper.EmployeeMapper -> employee
+                int lastMapperIndex = className.lastIndexOf("Mapper");
+                if (lastMapperIndex > 0) {
+                    String entityName = className.substring(className.lastIndexOf('.') + 1, lastMapperIndex);
+                    // 转换为下划线命名法，如 Employee -> employee
+                    return StrUtil.toUnderlineCase(entityName);
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 检查表是否在字段权限配置中（带缓存）
+     *
+     * @param tableName 表名
+     * @return 是否配置了字段权限
+     */
+    private boolean isTableInFieldPerm(String tableName) {
+        // 检查缓存中是否存在且未过期
+        CacheEntry<Boolean> cached = tableFieldControlCache.get(tableName);
+        if (cached != null && !cached.isExpired()) {
+            return cached.getValue();
+        }
+
+        // 查询 employee_field_perm 表中是否存在该 table_name
+        // SELECT COUNT(*) FROM employee_field_perm WHERE table_name = #{tableName}
+        long count = employeeFieldPermMapper.selectCount(new LambdaQueryWrapper<EmployeeFieldPerm>().eq(EmployeeFieldPerm::getTableName, tableName));
+        boolean result = count > 0;
+
+        // 示例实现，实际应查询数据库
+        // boolean result = true;
+
+        // 将结果放入缓存
+        tableFieldControlCache.put(tableName, new CacheEntry<>(result, System.currentTimeMillis() + CACHE_EXPIRATION_TIME));
+        return result;
+    }
+
+    /**
+     * 获取当前用户的身份证号
+     *
+     * @return 用户身份证号
+     */
+    private String getCurrentUserIdCard() {
+        // 需要集成具体的认证授权框架，例如Spring Security或Shiro
+        // 示例伪代码:
+        // Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        // if (auth != null && auth.getPrincipal() instanceof UserDetails) {
+        //     return ((UserDetails) auth.getPrincipal()).getIdCard();
+        // }
+        return "500112199907091244"; // 示例返回值
+    }
+
+    /**
+     * 获取用户有权限访问的字段列表（带缓存）
+     *
+     * @param tableName  表名
+     * @param userIdCard 用户身份证号
+     * @return 有权限的字段列表
+     */
+    private List<String> getUserPermittedFields(String tableName, String userIdCard) {
+        // 构造缓存键
+        String cacheKey = tableName + ":" + userIdCard;
+
+        // 检查缓存中是否存在且未过期
+        CacheEntry<List<String>> cached = fieldPermissionCache.get(cacheKey);
+        if (cached != null && !cached.isExpired()) {
+            return cached.getValue();
+        }
+
+        // 实际应查询数据库:
+        // SELECT field_name FROM employee_field_perm WHERE table_name = #{tableName} AND id_card = #{userIdCard}
+        // 返回查询结果
+        List<String> fields = new ArrayList<>();
+        final List<EmployeeFieldPerm> fieldPerms = employeeMapFields.get(userIdCard);
+        if (CollUtil.isEmpty(fieldPerms)) {
+            return fields;
+        }
+        for (EmployeeFieldPerm perm : fieldPerms) {
+            if (tableName.equals(perm.getTableName())) {
+                fields.add(perm.getFieldName());
+            }
+        }
+
+        // 将结果放入缓存
+        fieldPermissionCache.put(cacheKey, new CacheEntry<>(fields, System.currentTimeMillis() + CACHE_EXPIRATION_TIME));
+        return fields;
+    }
+
+    /**
+     * 根据字段权限修改SQL语句（处理多表情况）
+     *
+     * @param originalSql           原始SQL
+     * @param tableFieldPermissions 各表的字段权限映射
+     * @param userIdCard            用户身份证号
+     * @return 修改后的SQL
+     */
+    private String modifySqlWithFieldPermission(String originalSql, Map<String, List<String>> tableFieldPermissions, String userIdCard) {
+        // 对于每个需要控制的表，检查其字段权限并相应地修改SQL
+        for (Map.Entry<String, List<String>> entry : tableFieldPermissions.entrySet()) {
+            String tableName = entry.getKey();
+            List<String> permittedFields = entry.getValue();
+
+            // 如果用户对该表没有任何字段权限，则将该表的所有字段设置为NULL
+            if (permittedFields.isEmpty()) {
+                originalSql = replaceAllFieldsWithNull(originalSql, tableName);
+            } else {
+                // 替换无权限字段为NULL
+                originalSql = replaceUnauthorizedFieldsWithNull(originalSql, tableName, permittedFields);
+            }
+        }
+        log.info("Modified SQL with field permissions: {}", originalSql);
+        return originalSql;
+    }
+
+    /**
+     * 移除所有敏感字段（当用户未登录时）
+     *
+     * @param sql                   原始SQL
+     * @param tableFieldPermissions 字段权限映射
+     * @return 修改后的SQL
+     */
+    private String removeAllSensitiveFields(String sql, Map<String, List<String>> tableFieldPermissions) {
+        String modifiedSql = sql;
+        for (String tableName : tableFieldPermissions.keySet()) {
+            modifiedSql = replaceAllFieldsWithNull(modifiedSql, tableName);
+        }
+        return modifiedSql;
+    }
+
+    /**
+     * 将SQL中某表的所有字段替换为NULL（除必要字段外）
+     *
+     * @param sql       原始SQL
+     * @param tableName 表名
+     * @return 替换后的SQL
+     */
+    private String replaceAllFieldsWithNull(String sql, String tableName) {
+        // 这是一个简化的实现，实际应用中需要更复杂的SQL解析
+        // 可以使用JSqlParser等专业SQL解析库来处理复杂情况
+
+        try {
+            // 匹配SELECT和FROM之间的内容
+            Matcher selectMatcher = SELECT_PATTERN.matcher(sql);
+            StringBuffer sb = new StringBuffer();
+
+            while (selectMatcher.find()) {
+                String selectClause = selectMatcher.group(1);
+                // 处理SELECT子句，将指定表的字段替换为NULL
+                String replacement = handleSelectClauseForAllNull(selectClause, tableName);
+                selectMatcher.appendReplacement(sb, "SELECT " + replacement + " FROM");
+            }
+            selectMatcher.appendTail(sb);
+            return sb.toString();
+        } catch (Exception e) {
+            log.error("Failed to replace all fields with NULL for table: {}", tableName, e);
+            return sql; // 出错时返回原SQL，避免影响正常业务
+        }
+    }
+
+    /**
+     * 处理SELECT子句，将所有字段替换为NULL
+     *
+     * @param selectClause SELECT子句内容
+     * @param tableName    表名
+     * @return 处理后的SELECT子句
+     */
+    private String handleSelectClauseForAllNull(String selectClause, String tableName) {
+        // 当用户对表没有任何权限时，将该表的字段替换为NULL
+        // 拆分字段列表
+        String[] fields = selectClause.split(",");
+        StringBuilder result = new StringBuilder();
+
+        for (int i = 0; i < fields.length; i++) {
+            String field = fields[i].trim();
+            if (i > 0) {
+                result.append(", ");
+            }
+
+            // 提取字段名（去除别名等）
+            String fieldName = extractFieldName(field);
+            log.info("field: {}", fieldName);
+
+            // 检查字段是否属于当前表
+            if (isFieldBelongsToTable(field, tableName)) {
+                final List<EmployeeFieldPerm> fieldPerms = tableMapFields.get(tableName);
+                final Set<String> collect = fieldPerms.stream().map(EmployeeFieldPerm::getFieldName).collect(Collectors.toSet());
+                if (collect.contains(fieldName)) {
+                    result.append("NULL AS ").append(fieldName);
+
+                } else {
+                    result.append(fieldName);
+                }
+
+                // 属于当前表，替换为NULL
+
+            } else {
+                // 不属于当前表，保留原字段
+                result.append(field);
+            }
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * 将无权限字段替换为NULL
+     *
+     * @param sql             原始SQL
+     * @param tableName       表名
+     * @param permittedFields 允许访问的字段列表
+     * @return 替换后的SQL
+     */
+    private String replaceUnauthorizedFieldsWithNull(String sql, String tableName, List<String> permittedFields) {
+        // 这是一个简化的实现，实际应用中需要更复杂的SQL解析
+        // 可以使用JSqlParser等专业SQL解析库来处理复杂情况
+
+        try {
+            // 匹配SELECT和FROM之间的内容
+            Matcher selectMatcher = SELECT_PATTERN.matcher(sql);
+            StringBuffer sb = new StringBuffer();
+
+            while (selectMatcher.find()) {
+                String selectClause = selectMatcher.group(1);
+                // 处理SELECT子句，将无权限字段替换为NULL
+                String replacement = handleSelectClause(selectClause, tableName, permittedFields);
+                selectMatcher.appendReplacement(sb, "SELECT " + replacement + " FROM");
+            }
+            selectMatcher.appendTail(sb);
+            return sb.toString();
+        } catch (Exception e) {
+            log.error("Failed to replace unauthorized fields with NULL for table: {}", tableName, e);
+            return sql; // 出错时返回原SQL，避免影响正常业务
+        }
+    }
+
+    /**
+     * 处理SELECT子句，将无权限字段替换为NULL
+     *
+     * @param selectClause    SELECT子句内容
+     * @param tableName       表名
+     * @param permittedFields 允许访问的字段列表
+     * @return 处理后的SELECT子句
+     */
+    private String handleSelectClause(String selectClause, String tableName, List<String> permittedFields) {
+        log.info("permission fields: {}", permittedFields);
+        // 拆分字段列表
+        String[] fields = selectClause.split(",");
+        StringBuilder result = new StringBuilder();
+
+        for (int i = 0; i < fields.length; i++) {
+            String field = fields[i].trim();
+            if (i > 0) {
+                result.append(", ");
+            }
+
+            // 提取字段名（去除别名等）
+            String fieldName = extractFieldName(field);
+            log.info("field: {}", fieldName);
+            // 保留完整字段表达式
+
+            // 检查字段是否属于当前表
+            if (isFieldBelongsToTable(field, tableName)) {
+                // 判断字段是否在允许列表中
+                for (final String f : tableMapFields.get(tableName).stream().map(EmployeeFieldPerm::getFieldName).collect(Collectors.toSet())) {
+                    if (permittedFields.contains(f)) {
+                        // 有权限，保留原字段
+                        result.append(field);
+                    } else {
+                        // 无权限，替换为NULL
+                        result.append("NULL AS ").append(fieldName);
+                    }
+                }
+
+            } else {
+                // 不属于当前表，保留原字段
+                result.append(field);
+            }
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * 判断字段是否属于指定表
+     *
+     * @param fieldExpression 字段表达式
+     * @param tableName       表名
+     * @return 是否属于指定表
+     */
+    private boolean isFieldBelongsToTable(String fieldExpression, String tableName) {
+        // 简化处理，仅处理常见情况
+        String[] parts = fieldExpression.trim().split("\\s+");
+        if (parts.length >= 1) {
+            String fieldPart = parts[0];
+            // 处理tableName.fieldName格式
+            int dotIndex = fieldPart.lastIndexOf('.');
+            if (dotIndex > 0) {
+                String fieldTable = fieldPart.substring(0, dotIndex);
+                return tableName.equals(fieldTable);
+            } else {
+                // 没有表前缀，默认属于当前表（在简单查询中）
+                // 在复杂查询中需要更精确的判断逻辑
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 从字段表达式中提取字段名
+     *
+     * @param fieldExpression 字段表达式（可能包含别名等）
+     * @return 字段名
+     */
+    private String extractFieldName(String fieldExpression) {
+        // 去除空格
+        fieldExpression = fieldExpression.trim();
+
+        // 处理各种情况：
+        // 1. fieldName
+        // 2. tableName.fieldName
+        // 3. fieldName AS alias
+        // 4. tableName.fieldName AS alias
+        // 5. function(fieldName) AS alias
+
+        // 简化处理，仅处理常见情况
+        String[] parts = fieldExpression.split("\\s+");
+        if (parts.length >= 1) {
+            String fieldPart = parts[0];
+            // 处理tableName.fieldName格式
+            int dotIndex = fieldPart.lastIndexOf('.');
+            if (dotIndex > 0) {
+                return fieldPart.substring(dotIndex + 1);
+            } else {
+                return fieldPart;
+            }
+        }
+
+        return fieldExpression;
+    }
+
+    /**
+     * 修改BoundSql中的SQL语句
+     *
+     * @param ms       MappedStatement对象
+     * @param boundSql 原始BoundSql对象
+     * @param newSql   新的SQL语句
+     */
+    private void modifyBoundSql(MappedStatement ms, BoundSql boundSql, String newSql) {
+        try {
+            // 使用反射修改BoundSql中的SQL语句
+            MetaObject metaObject = SystemMetaObject.forObject(boundSql);
+            metaObject.setValue("sql", newSql);
+        } catch (Exception e) {
+            log.error("Failed to modify SQL in BoundSql", e);
+        }
+    }
+
+    /**
+     * 过滤更新参数中的字段
+     *
+     * @param parameter       参数对象
+     * @param tableName       表名
+     * @param permittedFields 允许的字段列表
+     */
+    private void filterUpdateParameters(Object parameter, String tableName, List<String> permittedFields) throws SQLException {
+        if (parameter == null) {
+            return;
+        }
+
+        try {
+            // 使用反射处理参数对象
+            MetaObject metaObject = SystemMetaObject.forObject(parameter);
+
+            // 获取所有setter方法对应的属性
+            String[] setters = metaObject.getSetterNames();
+
+            // 检查每个属性是否在允许列表中
+            for (String fieldName : setters) {
+                // 转换为下划线命名法进行比较
+                String columnName = StrUtil.toUnderlineCase(fieldName);
+
+                // 如果字段不在允许列表中，则设置为null
+                if (!permittedFields.contains(columnName)) {
+                    // 检查该字段是否有值
+                    if (metaObject.hasGetter(fieldName)) {
+                        Object value = metaObject.getValue(fieldName);
+                        final Set<String> collect = tableMapFields.get(tableName).stream()
+                                .map(EmployeeFieldPerm::getFieldName)
+                                .collect(Collectors.toSet());
+                        if (value != null && collect.contains(fieldName)) {
+                            // 记录警告日志
+                            log.warn("User attempted to update field '{}' in table '{}' without permission. Setting to null.", columnName, tableName);
+                            // 设置为null以阻止更新
+                            metaObject.setValue(fieldName, null);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Error filtering update parameters for table: {}", tableName, e);
+            throw new SQLException("Failed to filter update parameters", e);
+        }
+    }
+
+    /**
+     * 缓存条目类，包含值和过期时间
+     *
+     * @param <T> 值的类型
+     */
+    private static class CacheEntry<T> {
+        @Getter
+        private final T value;
+        private final long expirationTime;
+
+        public CacheEntry(T value, long expirationTime) {
+            this.value = value;
+            this.expirationTime = expirationTime;
+        }
+
+        public boolean isExpired() {
+            return System.currentTimeMillis() > expirationTime;
+        }
+    }
+}
